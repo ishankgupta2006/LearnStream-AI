@@ -240,6 +240,18 @@ export async function getProcessingStatus(jobId) {
 export async function getVideoContent(videoId) {
   return apiRequest(`/videos/${videoId}`);
 }
+
+export async function generateSummary(videoId) {
+  return apiRequest(`/videos/${videoId}/generate-summary`, { method: 'POST' });
+}
+
+export async function generateKeyPoints(videoId) {
+  return apiRequest(`/videos/${videoId}/generate-keypoints`, { method: 'POST' });
+}
+
+export async function generateQuiz(videoId) {
+  return apiRequest(`/videos/${videoId}/generate-quiz`, { method: 'POST' });
+}
 export async function createVideoNote(videoId, text, timestamp) {
   return apiRequest(`/videos/${videoId}/notes`, {
     method: 'POST',
@@ -450,6 +462,9 @@ export default {
   processVideo,
   getProcessingStatus,
   getVideoContent,
+  generateSummary,
+  generateKeyPoints,
+  generateQuiz,
   createVideoNote,
   deleteVideoNote,
   

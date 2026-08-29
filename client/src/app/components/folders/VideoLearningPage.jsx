@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
+  CheckCircle2,
   Clock,
   FileText,
   ListChecks,
+  Loader2,
   MessageSquarePlus,
-  PlaySquare,
+  Sparkles,
   Trash2,
   X
 } from 'lucide-react';
 
 import * as api from '../../../services/api';
+import { useApp } from '../../context/AppContext';
 import { Summary } from '../Summary';
 import { KeyPoints } from '../KeyPoints';
 import { Quiz } from '../Quiz';
@@ -52,9 +55,10 @@ const loadYouTubePlayerApi = () =>
     window.onYouTubeIframeAPIReady = () => resolve(window.YT);
   });
 
-export const VideoLearningPage = ({ video, onClose }) => {
+export const VideoLearningPage = ({ video, onClose, onVideoUpdated }) => {
   const playerElementRef = useRef(null);
   const playerRef = useRef(null);
+  const { setCurrentVideo, resetQuiz } = useApp();
 
   const [notes, setNotes] = useState(video.notes || []);
   const [noteText, setNoteText] = useState('');
@@ -62,9 +66,72 @@ export const VideoLearningPage = ({ video, onClose }) => {
   const [noteError, setNoteError] = useState('');
   const [activeSection, setActiveSection] = useState('summary');
 
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [isGeneratingKeyPoints, setIsGeneratingKeyPoints] = useState(false);
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [generationError, setGenerationError] = useState('');
+
+  const hasSummary = Boolean(video.summary);
+  const hasKeyPoints = Boolean(video.keyPoints?.length);
+  const hasQuiz = Boolean(video.quiz?.length);
+
   useEffect(() => {
     setNotes(video.notes || []);
   }, [video]);
+
+  // Summary/KeyPoints/Quiz read from the global currentVideo in context -
+  // keep it in sync with whichever video is open in this player so they
+  // always show the right content (and pick up newly-generated fields).
+  useEffect(() => {
+    setCurrentVideo(video);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video]);
+
+  const applyVideoUpdate = (updates) => {
+    const updatedVideo = { ...video, ...updates };
+    setCurrentVideo(updatedVideo);
+    onVideoUpdated?.(updatedVideo);
+  };
+
+  const handleGenerateSummary = async () => {
+    setGenerationError('');
+    setIsGeneratingSummary(true);
+    try {
+      const response = await api.generateSummary(video.id);
+      applyVideoUpdate({ summary: response.summary });
+    } catch (error) {
+      setGenerationError(error.message || 'Could not generate the summary.');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  const handleGenerateKeyPoints = async () => {
+    setGenerationError('');
+    setIsGeneratingKeyPoints(true);
+    try {
+      const response = await api.generateKeyPoints(video.id);
+      applyVideoUpdate({ keyPoints: response.keyPoints });
+    } catch (error) {
+      setGenerationError(error.message || 'Could not generate key points.');
+    } finally {
+      setIsGeneratingKeyPoints(false);
+    }
+  };
+
+  const handleGenerateQuiz = async () => {
+    setGenerationError('');
+    setIsGeneratingQuiz(true);
+    try {
+      const response = await api.generateQuiz(video.id);
+      resetQuiz();
+      applyVideoUpdate({ quiz: response.quiz, keyPoints: response.keyPoints || video.keyPoints });
+    } catch (error) {
+      setGenerationError(error.message || 'Could not generate the quiz.');
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
+  };
 
   useEffect(() => {
     let isCancelled = false;
@@ -115,8 +182,13 @@ export const VideoLearningPage = ({ video, onClose }) => {
         currentTimestamp
       );
 
-      setNotes((currentNotes) => [...currentNotes, response.note]);
+      const updatedNotes = [...notes, response.note];
+      setNotes(updatedNotes);
       setNoteText('');
+      // Keep the parent's video object (and AppContext's currentVideo) in
+      // sync with the latest notes - otherwise a later Generate action
+      // would merge against the stale `video` prop and wipe these out.
+      applyVideoUpdate({ notes: updatedNotes });
     } catch (error) {
       setNoteError(error.message || 'Could not save the note.');
     } finally {
@@ -128,9 +200,9 @@ export const VideoLearningPage = ({ video, onClose }) => {
     try {
       await api.deleteVideoNote(video.id, noteId);
 
-      setNotes((currentNotes) =>
-        currentNotes.filter((note) => (note._id || note.id) !== noteId)
-      );
+      const updatedNotes = notes.filter((note) => (note._id || note.id) !== noteId);
+      setNotes(updatedNotes);
+      applyVideoUpdate({ notes: updatedNotes });
     } catch (error) {
       setNoteError(error.message || 'Could not delete the note.');
     }
@@ -259,7 +331,7 @@ export const VideoLearningPage = ({ video, onClose }) => {
         </aside>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-5 mt-10">
+      <div className="grid md:grid-cols-3 gap-5 mt-10">
         <button
           type="button"
           onClick={() => setActiveSection('summary')}
@@ -269,34 +341,44 @@ export const VideoLearningPage = ({ video, onClose }) => {
               : 'border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 hover:border-indigo-300'
           }`}
         >
-          <FileText className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+          <div className="flex items-center justify-between">
+            <FileText className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+            {hasSummary && <CheckCircle2 className="w-5 h-5 text-green-500" />}
+          </div>
           <h3 className="mt-4 text-xl font-bold text-neutral-900 dark:text-white">
             Video Summary
           </h3>
           <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-            Review the AI-generated explanation and key concepts.
+            {hasSummary
+              ? 'Review the AI-generated explanation and key concepts.'
+              : 'Not generated yet - click to generate.'}
           </p>
         </button>
 
-<button
+        <button
           type="button"
           onClick={() => setActiveSection('keypoints')}
           className={`text-left p-6 rounded-2xl border transition-all ${
-            activeSection === 'quiz'
-              ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/30 shadow-lg shadow-purple-500/10'
-              : 'border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 hover:border-purple-300'
+            activeSection === 'keypoints'
+              ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 shadow-lg shadow-amber-500/10'
+              : 'border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 hover:border-amber-300'
           }`}
         >
-          <ListChecks className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+          <div className="flex items-center justify-between">
+            <ListChecks className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+            {hasKeyPoints && <CheckCircle2 className="w-5 h-5 text-green-500" />}
+          </div>
           <h3 className="mt-4 text-xl font-bold text-neutral-900 dark:text-white">
             Key Points
           </h3>
           <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-            Test what you understood with the existing AI quiz.
+            {hasKeyPoints
+              ? 'The main takeaways from this video, broken down.'
+              : 'Not generated yet - click to generate.'}
           </p>
         </button>
 
-<button
+        <button
           type="button"
           onClick={() => setActiveSection('quiz')}
           className={`text-left p-6 rounded-2xl border transition-all ${
@@ -305,55 +387,97 @@ export const VideoLearningPage = ({ video, onClose }) => {
               : 'border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 hover:border-purple-300'
           }`}
         >
-          <ListChecks className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+          <div className="flex items-center justify-between">
+            <Sparkles className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+            {hasQuiz && <CheckCircle2 className="w-5 h-5 text-green-500" />}
+          </div>
           <h3 className="mt-4 text-xl font-bold text-neutral-900 dark:text-white">
-            Generate Quiz
+            Quiz
           </h3>
           <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-            Test what you understood with the existing AI quiz.
+            {hasQuiz
+              ? 'Test what you understood with the AI quiz.'
+              : 'Not generated yet - click to generate.'}
           </p>
         </button>
       </div>
 
+      {generationError && (
+        <p className="mt-4 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          {generationError}
+        </p>
+      )}
+
       <div className="mt-6">
-        {activeSection === 'summary' && <Summary />}
+        {activeSection === 'summary' &&
+          (hasSummary ? (
+            <Summary />
+          ) : (
+            <GeneratePrompt
+              icon={FileText}
+              title="Generate the video summary"
+              description="Have AI read through the video's content and write a clear, detailed summary you can study from."
+              isGenerating={isGeneratingSummary}
+              onGenerate={handleGenerateSummary}
+            />
+          ))}
 
-            {activeSection === 'keypoints' && (
-              <div className="space-y-4">
-                {Array.isArray(video?.keyPoints) && video.keyPoints.length > 0 ? (
-                  video.keyPoints.map((point, index) => (
-                    <div
-                      key={index}
-                      className="flex gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4"
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-sm font-bold text-indigo-600 dark:text-indigo-300">
-                        {index + 1}
-                      </div>
-                      <p className="leading-7 text-neutral-700 dark:text-neutral-300">
-                        {typeof point === 'string'
-                          ? point
-                          : point?.point || point?.text || point?.content || JSON.stringify(point)}
-                      </p>
-                    </div>
-                  ))
-                ) : typeof video?.keyPoints === 'string' && video.keyPoints.trim() ? (
-                  <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
-                    <p className="whitespace-pre-line leading-7 text-neutral-700 dark:text-neutral-300">
-                      {video.keyPoints}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 text-center">
-                    <p className="text-neutral-500 dark:text-neutral-400">
-                      Key Points are not available for this video yet.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+        {activeSection === 'keypoints' &&
+          (hasKeyPoints ? (
+            <KeyPoints />
+          ) : (
+            <GeneratePrompt
+              icon={ListChecks}
+              title="Generate key points"
+              description="Have AI pull out the main takeaways from this video as a clear, numbered list."
+              isGenerating={isGeneratingKeyPoints}
+              onGenerate={handleGenerateKeyPoints}
+            />
+          ))}
 
-            {activeSection === 'quiz' && <Quiz />}
+        {activeSection === 'quiz' &&
+          (hasQuiz ? (
+            <Quiz />
+          ) : (
+            <GeneratePrompt
+              icon={Sparkles}
+              title="Generate a quiz"
+              description="Have AI create a 10-question quiz based on this video so you can test what you've learned."
+              isGenerating={isGeneratingQuiz}
+              onGenerate={handleGenerateQuiz}
+            />
+          ))}
       </div>
     </section>
   );
 };
+
+const GeneratePrompt = ({ icon: Icon, title, description, isGenerating, onGenerate }) => (
+  <div className="bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm rounded-2xl shadow-lg border border-dashed border-neutral-300 dark:border-neutral-700 p-10 text-center">
+    <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center">
+      <Icon className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+    </div>
+    <h3 className="mt-4 text-lg font-bold text-neutral-900 dark:text-white">{title}</h3>
+    <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400 max-w-md mx-auto">
+      {description}
+    </p>
+    <button
+      type="button"
+      onClick={onGenerate}
+      disabled={isGenerating}
+      className="mt-5 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold"
+    >
+      {isGenerating ? (
+        <>
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Generating...
+        </>
+      ) : (
+        <>
+          <Sparkles className="w-4 h-4" />
+          Generate
+        </>
+      )}
+    </button>
+  </div>
+);

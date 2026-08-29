@@ -69,15 +69,26 @@ completedAt: {
 
   summary: {
     type: String,
-    required: true
+    default: null
   },
   keyPoints: {
     type: [String],
-    required: true
+    default: []
   },
   quiz: {
     type: [quizQuestionSchema],
-    required: true
+    default: []
+  },
+  // The raw transcript (or metadata-fallback text) fetched when the video
+  // was added. Stored so Summary/Key Points/Quiz can each be generated
+  // on-demand later without re-fetching the transcript every time.
+  transcript: {
+    type: String,
+    default: null
+  },
+  transcriptSource: {
+    type: String,
+    default: null
   },
     notes: {
     type: [timestampNoteSchema],

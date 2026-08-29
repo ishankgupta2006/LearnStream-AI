@@ -9,7 +9,7 @@ const User = require('../models/User');
  * Update job progress in database
  */
 async function updateJobProgress(jobId, progress, step, status = 'processing') {
-  const stepOrder = ['fetching', 'transcribing', 'summarizing', 'extracting', 'quiz-generation'];
+  const stepOrder = ['fetching', 'transcribing'];
   
   const steps = stepOrder.map(s => ({
     name: s,
@@ -29,7 +29,14 @@ async function updateJobProgress(jobId, progress, step, status = 'processing') {
 }
 
 /**
- * Main video processing pipeline
+ * Main video processing pipeline.
+ *
+ * This ONLY fetches the video's metadata and transcript, then saves the
+ * video right away - it does NOT generate the AI summary, key points, or
+ * quiz. Those are generated on-demand later (see generate-summary,
+ * generate-keypoints, generate-quiz routes) when the learner actually asks
+ * for them, so adding a video is fast and doesn't make the user wait
+ * through 3 separate AI calls before they can even see the video.
  */
 async function processVideo(
   jobId,
@@ -62,12 +69,12 @@ async function processVideo(
       videoTitle: metadata.title
     });
     
-    await updateJobProgress(jobId, 10, 'fetching');
+    await updateJobProgress(jobId, 30, 'fetching');
     
     // ═══════════════════════════════════════════════════════════
-    // STEP 2: Transcribe Video (15-45%)
+    // STEP 2: Transcribe Video (40-90%)
     // ═══════════════════════════════════════════════════════════
-    await updateJobProgress(jobId, 15, 'transcribing');
+    await updateJobProgress(jobId, 40, 'transcribing');
     
     let transcription;
     try {
@@ -79,7 +86,7 @@ async function processVideo(
       throw new Error(`Failed to transcribe: ${error.message}`);
     }
     
-    await updateJobProgress(jobId, 45, 'transcribing');
+    await updateJobProgress(jobId, 90, 'transcribing');
     
     // Check if we have actual content
     if (!transcription.text || transcription.text.length < 100) {
@@ -87,68 +94,11 @@ async function processVideo(
     }
     
     // ═══════════════════════════════════════════════════════════
-    // STEP 3: Generate Summary (50-60%)
-    // ═══════════════════════════════════════════════════════════
-    await updateJobProgress(jobId, 50, 'summarizing');
-    
-    let summary;
-    try {
-      summary = await generateSummary(transcription.text, metadata.title);
-      console.log(`✓ Generated summary (${summary.length} chars)`);
-    } catch (error) {
-      console.error('Summary generation failed, using fallback');
-      summary = `This video titled "${metadata.title}" covers important concepts and information. The content provides valuable insights on the topic discussed by ${metadata.channelName}. Watch the full video to get the complete understanding of the material presented.`;
-    }
-    
-    await updateJobProgress(jobId, 60, 'summarizing');
-    
-    // ═══════════════════════════════════════════════════════════
-    // STEP 4: Extract Key Points (65-75%)
-    // ═══════════════════════════════════════════════════════════
-    await updateJobProgress(jobId, 65, 'extracting');
-    
-    let keyPoints;
-    try {
-      keyPoints = await extractKeyPoints(transcription.text, metadata.title);
-      console.log(`✓ Extracted ${keyPoints.length} key points`);
-    } catch (error) {
-      console.error('Key points extraction failed, using fallback');
-      keyPoints = [
-        'Introduction to the main topic and concepts',
-        'Key principles and fundamentals discussed',
-        'Practical applications and examples shown',
-        'Best practices and recommendations',
-        'Common challenges and solutions',
-        'Tools and resources mentioned',
-        'Important considerations for implementation',
-        'Summary and next steps for learners'
-      ];
-    }
-    
-    await updateJobProgress(jobId, 75, 'extracting');
-    
-    // ═══════════════════════════════════════════════════════════
-    // STEP 5: Generate Quiz (80-95%)
-    // ═══════════════════════════════════════════════════════════
-    await updateJobProgress(jobId, 80, 'quiz-generation');
-    
-    let quiz;
-    try {
-      quiz = await generateQuiz(transcription.text, metadata.title, keyPoints);
-      console.log(`✓ Generated ${quiz.length} quiz questions`);
-    } catch (error) {
-      console.error('Quiz generation failed, using fallback');
-      const { generateKeyPointQuiz } = require('./aiService');
-      quiz = generateKeyPointQuiz(keyPoints, metadata.title);
-    }
-    
-    await updateJobProgress(jobId, 95, 'quiz-generation');
-    
-    // ═══════════════════════════════════════════════════════════
-    // STEP 6: Save Results (100%)
+    // STEP 3: Save video (no AI generation yet)
     // ═══════════════════════════════════════════════════════════
     
-    // Create video document
+    // Create video document. summary/keyPoints/quiz are left empty -
+    // they're generated on demand later, from the stored transcript below.
     const video = await Video.create({
       userId,
       youtubeVideoId: metadata.videoId,
@@ -159,9 +109,11 @@ async function processVideo(
       channelName: metadata.channelName,
       folderId,
       displayTitle,
-      summary,
-      keyPoints,
-      quiz
+      transcript: transcription.text,
+      transcriptSource: transcription.source || null,
+      summary: null,
+      keyPoints: [],
+      quiz: []
     });
     
     console.log(`✓ Saved video: ${video._id}`);
@@ -181,10 +133,7 @@ async function processVideo(
       completedAt: new Date(),
       steps: [
         { name: 'fetching', status: 'completed' },
-        { name: 'transcribing', status: 'completed' },
-        { name: 'summarizing', status: 'completed' },
-        { name: 'extracting', status: 'completed' },
-        { name: 'quiz-generation', status: 'completed' }
+        { name: 'transcribing', status: 'completed' }
       ]
     });
     

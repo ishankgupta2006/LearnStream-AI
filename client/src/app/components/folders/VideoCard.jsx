@@ -16,6 +16,9 @@ export const VideoCard = ({
 }) => {
   const title = video.displayTitle || video.videoTitle;
   const isCompleted = video.learningStatus === 'completed';
+  const hasAnyAiContent = Boolean(
+    video.summary || video.keyPoints?.length || video.quiz?.length
+  );
 
   return (
     <article
@@ -60,9 +63,15 @@ export const VideoCard = ({
         )}
 
         <div className="flex flex-wrap gap-2 mt-3">
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+          <span
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+              hasAnyAiContent
+                ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'
+            }`}
+          >
             <FileText className="w-3.5 h-3.5" />
-            AI Learning Content
+            {hasAnyAiContent ? 'AI Learning Content' : 'Ready to generate'}
           </span>
 
           {isCompleted && (

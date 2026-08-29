@@ -18,7 +18,8 @@ export const FolderVideosPage = ({ folder, onBack }) => {
   processVideo,
   openVideoInFolder,
   deleteFromHistory,
-  currentVideo
+  justAddedVideo,
+  clearJustAddedVideo
 } = useApp();
 
   const [videos, setVideos] = useState([]);
@@ -58,12 +59,13 @@ export const FolderVideosPage = ({ folder, onBack }) => {
   // full-page Learning Dashboard. Auto-open it in the player and refresh
   // the folder's video list so the new card shows up too.
   useEffect(() => {
-    if (currentVideo && String(currentVideo.folderId) === String(folder.id)) {
-      setActiveVideo(currentVideo);
+    if (justAddedVideo && String(justAddedVideo.folderId) === String(folder.id)) {
+      setActiveVideo(justAddedVideo);
       loadVideos(search);
+      clearJustAddedVideo();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentVideo]);
+  }, [justAddedVideo]);
 
   const handleAddVideo = async ({ videoUrl, videoTitle }) => {
     try {
@@ -282,6 +284,14 @@ const toggleSelected = (video) => {
     onClose={() => {
       setActiveVideo(null);
       setSelectedIds([]);
+    }}
+    onVideoUpdated={(updatedVideo) => {
+      setActiveVideo(updatedVideo);
+      setVideos((currentVideos) =>
+        currentVideos.map((item) =>
+          item.id === updatedVideo.id ? { ...item, ...updatedVideo } : item
+        )
+      );
     }}
   />
 )}

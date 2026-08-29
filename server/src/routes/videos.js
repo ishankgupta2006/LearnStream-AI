@@ -381,15 +381,140 @@ router.get('/:videoId', authenticateToken, async (req, res, next) => {
       thumbnail: video.thumbnail,
       duration: video.duration,
       channelName: video.channelName,
+      folderId: video.folderId,
+      displayTitle: video.displayTitle,
       processedAt: video.processedAt,
       summary: video.summary,
       keyPoints: video.keyPoints,
       quiz: video.quiz,
+      hasTranscript: Boolean(video.transcript),
+      transcriptSource: video.transcriptSource,
       notes: video.notes,
       quizTaken: video.quizTaken,
       quizScore: video.quizScore
     });
     
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/videos/:videoId/generate-summary
+ * Generate (or regenerate) the AI summary on demand from the stored transcript.
+ */
+router.post('/:videoId/generate-summary', authenticateToken, async (req, res, next) => {
+  try {
+    const video = await Video.findOne({ _id: req.params.videoId, userId: req.user._id });
+
+    if (!video) {
+      return res.status(404).json({ success: false, error: 'Video not found', code: 'NOT_FOUND' });
+    }
+    if (!video.transcript) {
+      return res.status(400).json({ success: false, error: 'No transcript available for this video', code: 'NO_TRANSCRIPT' });
+    }
+
+    const { generateSummary } = require('../services/aiService');
+    let summary;
+    try {
+      summary = await generateSummary(video.transcript, video.videoTitle);
+    } catch (error) {
+      console.error('On-demand summary generation failed:', error.message);
+      summary = `This video titled "${video.videoTitle}" covers important concepts and information. The content provides valuable insights on the topic discussed by ${video.channelName || 'the creator'}. Watch the full video to get the complete understanding of the material presented.`;
+    }
+
+    video.summary = summary;
+    await video.save();
+
+    res.json({ success: true, summary });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/videos/:videoId/generate-keypoints
+ * Generate (or regenerate) the AI key points on demand from the stored transcript.
+ */
+router.post('/:videoId/generate-keypoints', authenticateToken, async (req, res, next) => {
+  try {
+    const video = await Video.findOne({ _id: req.params.videoId, userId: req.user._id });
+
+    if (!video) {
+      return res.status(404).json({ success: false, error: 'Video not found', code: 'NOT_FOUND' });
+    }
+    if (!video.transcript) {
+      return res.status(400).json({ success: false, error: 'No transcript available for this video', code: 'NO_TRANSCRIPT' });
+    }
+
+    const { extractKeyPoints } = require('../services/aiService');
+    let keyPoints;
+    try {
+      keyPoints = await extractKeyPoints(video.transcript, video.videoTitle);
+    } catch (error) {
+      console.error('On-demand key points extraction failed:', error.message);
+      keyPoints = [
+        'Introduction to the main topic and concepts',
+        'Key principles and fundamentals discussed',
+        'Practical applications and examples shown',
+        'Best practices and recommendations',
+        'Common challenges and solutions',
+        'Tools and resources mentioned',
+        'Important considerations for implementation',
+        'Summary and next steps for learners'
+      ];
+    }
+
+    video.keyPoints = keyPoints;
+    await video.save();
+
+    res.json({ success: true, keyPoints });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/videos/:videoId/generate-quiz
+ * Generate (or regenerate) the AI quiz on demand from the stored transcript.
+ * Uses the video's key points if already generated (better quiz quality);
+ * generates key points first if they don't exist yet.
+ */
+router.post('/:videoId/generate-quiz', authenticateToken, async (req, res, next) => {
+  try {
+    const video = await Video.findOne({ _id: req.params.videoId, userId: req.user._id });
+
+    if (!video) {
+      return res.status(404).json({ success: false, error: 'Video not found', code: 'NOT_FOUND' });
+    }
+    if (!video.transcript) {
+      return res.status(400).json({ success: false, error: 'No transcript available for this video', code: 'NO_TRANSCRIPT' });
+    }
+
+    const { generateQuiz, extractKeyPoints, generateKeyPointQuiz } = require('../services/aiService');
+
+    let keyPoints = video.keyPoints;
+    if (!keyPoints || keyPoints.length === 0) {
+      try {
+        keyPoints = await extractKeyPoints(video.transcript, video.videoTitle);
+        video.keyPoints = keyPoints;
+      } catch (error) {
+        keyPoints = ['Main concepts covered in this video'];
+      }
+    }
+
+    let quiz;
+    try {
+      quiz = await generateQuiz(video.transcript, video.videoTitle, keyPoints);
+    } catch (error) {
+      console.error('On-demand quiz generation failed:', error.message);
+      quiz = generateKeyPointQuiz(keyPoints, video.videoTitle);
+    }
+
+    video.quiz = quiz;
+    await video.save();
+
+    res.json({ success: true, quiz, keyPoints: video.keyPoints });
   } catch (error) {
     next(error);
   }

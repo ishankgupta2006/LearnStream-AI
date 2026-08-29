@@ -44,6 +44,14 @@ export const AppProvider = ({ children }) => {
   // Uses a ref (not state) because pollProcessingStatus is a stable
   // useCallback and would otherwise close over a stale value.
   const processingFolderIdRef = useRef(null);
+  // One-shot signal for "a video was just added and finished processing
+  // from inside this folder - auto-open it". This is deliberately SEPARATE
+  // from currentVideo, which gets updated every time ANY video is viewed
+  // (including just re-opening an old one) - reusing currentVideo for this
+  // caused the folder page to keep re-opening whatever was last viewed
+  // every time you navigated back into that folder.
+  const [justAddedVideo, setJustAddedVideo] = useState(null);
+  const clearJustAddedVideo = () => setJustAddedVideo(null);
 
   // Load dark mode preference on mount
   useEffect(() => {
@@ -104,9 +112,10 @@ export const AppProvider = ({ children }) => {
 
         if (processingFolderIdRef.current) {
           // Video was added from inside a folder - go back to that
-          // folder's page (FolderVideosPage watches `currentVideo` and
-          // will auto-open it in the "Now Learning" player) instead of
-          // taking over the whole screen with the Learning Dashboard.
+          // folder's page and auto-open it in the "Now Learning" player
+          // instead of taking over the whole screen with the Learning
+          // Dashboard.
+          setJustAddedVideo(video);
           setCurrentStep('input');
         } else {
           setCurrentStep('learning');
@@ -177,8 +186,11 @@ export const AppProvider = ({ children }) => {
         setQuizAnswers({});
         setQuizSubmitted(false);
         setQuizStartTime(Date.now());
-        // If this was triggered from inside a folder, stay there instead
-        // of jumping to the full-page Learning Dashboard.
+        // If this was triggered from inside a folder, stay there and
+        // auto-open it instead of jumping to the full-page Learning Dashboard.
+        if (folderId) {
+          setJustAddedVideo(video);
+        }
         setCurrentStep(folderId ? 'input' : 'learning');
         processingFolderIdRef.current = null;
       } else if (response.jobId) {
@@ -311,6 +323,9 @@ export const AppProvider = ({ children }) => {
         currentView,
         setCurrentView,
         currentVideo,
+        setCurrentVideo,
+        justAddedVideo,
+        clearJustAddedVideo,
         history,
         quizAnswers,
         quizSubmitted,
